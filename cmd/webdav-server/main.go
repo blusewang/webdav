@@ -7,14 +7,14 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/emersion/go-webdav"
+	"github.com/blusewang/webdav"
 )
 
 func main() {
 	var addr string
 	flag.StringVar(&addr, "addr", ":8080", "listening address")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [options...] [directory]\n", os.Args[0])
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [options...] [directory]\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 	flag.Parse()

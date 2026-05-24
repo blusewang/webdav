@@ -1,6 +1,6 @@
 # go-webdav
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/emersion/go-webdav.svg)](https://pkg.go.dev/github.com/emersion/go-webdav)
+[![Go Reference](https://pkg.go.dev/badge/github.com/blusewang/webdav.svg)](https://pkg.go.dev/github.com/blusewang/webdav)
 
 A Go library for [WebDAV], [CalDAV] and [CardDAV].
 
