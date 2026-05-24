@@ -34,6 +34,8 @@ type Backend interface {
 	CreateCalendar(ctx context.Context, calendar *Calendar) error
 	ListCalendars(ctx context.Context) ([]Calendar, error)
 	GetCalendar(ctx context.Context, path string) (*Calendar, error)
+	DeleteCalendar(ctx context.Context, path string) error
+	UpdateCalendar(ctx context.Context, calendar *Calendar) error
 
 	GetCalendarObject(ctx context.Context, path string, req *CalendarCompRequest) (*CalendarObject, error)
 	ListCalendarObjects(ctx context.Context, path string, req *CalendarCompRequest) ([]CalendarObject, error)
@@ -316,6 +318,10 @@ func (b *backend) resourceTypeAtPath(reqPath string) resourceType {
 
 func (b *backend) Options(r *http.Request) (caps []string, allow []string, err error) {
 	caps = []string{"calendar-access"}
+
+	if b.resourceTypeAtPath(r.URL.Path) == resourceTypeCalendar {
+		return caps, []string{http.MethodOptions, "PROPFIND", "PROPPATCH", "REPORT", "DELETE", "MKCOL"}, nil
+	}
 
 	if b.resourceTypeAtPath(r.URL.Path) != resourceTypeCalendarObject {
 		return caps, []string{http.MethodOptions, "PROPFIND", "REPORT", "DELETE", "MKCOL"}, nil
@@ -662,7 +668,82 @@ func (b *backend) propFindAllCalendarObjects(ctx context.Context, propfind *inte
 }
 
 func (b *backend) PropPatch(r *http.Request, update *internal.PropertyUpdate) (*internal.Response, error) {
-	return nil, internal.HTTPErrorf(http.StatusNotImplemented, "caldav: PropPatch not implemented")
+	resp := internal.NewOKResponse(r.URL.Path)
+
+	if b.resourceTypeAtPath(r.URL.Path) != resourceTypeCalendar {
+		for _, prop := range update.Remove {
+			emptyVal := internal.NewRawXMLElement(prop.Prop.XMLName, nil, nil)
+			if err := resp.EncodeProp(http.StatusForbidden, emptyVal); err != nil {
+				return nil, err
+			}
+		}
+		for _, prop := range update.Set {
+			emptyVal := internal.NewRawXMLElement(prop.Prop.XMLName, nil, nil)
+			if err := resp.EncodeProp(http.StatusForbidden, emptyVal); err != nil {
+				return nil, err
+			}
+		}
+		return resp, nil
+	}
+
+	cal, err := b.Backend.GetCalendar(r.Context(), r.URL.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, remove := range update.Remove {
+		for _, raw := range remove.Prop.Raw {
+			name, ok := raw.XMLName()
+			if !ok {
+				continue
+			}
+			emptyVal := internal.NewRawXMLElement(name, nil, nil)
+			if name == internal.DisplayNameName {
+				cal.Name = ""
+				if err := resp.EncodeProp(http.StatusOK, &internal.DisplayName{Name: cal.Name}); err != nil {
+					return nil, err
+				}
+			} else {
+				if err := resp.EncodeProp(http.StatusNotFound, emptyVal); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	for _, set := range update.Set {
+		for _, raw := range set.Prop.Raw {
+			name, ok := raw.XMLName()
+			if !ok {
+				continue
+			}
+			if name == internal.DisplayNameName {
+				var dn internal.DisplayName
+				if err := raw.Decode(&dn); err != nil {
+					emptyVal := internal.NewRawXMLElement(name, nil, nil)
+					if err := resp.EncodeProp(http.StatusBadRequest, emptyVal); err != nil {
+						return nil, err
+					}
+					continue
+				}
+				cal.Name = dn.Name
+				if err := resp.EncodeProp(http.StatusOK, &internal.DisplayName{Name: cal.Name}); err != nil {
+					return nil, err
+				}
+			} else {
+				emptyVal := internal.NewRawXMLElement(name, nil, nil)
+				if err := resp.EncodeProp(http.StatusNotFound, emptyVal); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	if err := b.Backend.UpdateCalendar(r.Context(), cal); err != nil {
+		return nil, err
+	}
+
+	return resp, nil
 }
 
 func (b *backend) Put(w http.ResponseWriter, r *http.Request) error {
@@ -712,7 +793,13 @@ func (b *backend) Put(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (b *backend) Delete(r *http.Request) error {
-	return b.Backend.DeleteCalendarObject(r.Context(), r.URL.Path)
+	switch b.resourceTypeAtPath(r.URL.Path) {
+	case resourceTypeCalendar:
+		return b.Backend.DeleteCalendar(r.Context(), r.URL.Path)
+	case resourceTypeCalendarObject:
+		return b.Backend.DeleteCalendarObject(r.Context(), r.URL.Path)
+	}
+	return internal.HTTPErrorf(http.StatusForbidden, "caldav: cannot delete resource at given location")
 }
 
 func (b *backend) Mkcol(r *http.Request) error {
@@ -727,14 +814,14 @@ func (b *backend) Mkcol(r *http.Request) error {
 	if !internal.IsRequestBodyEmpty(r) {
 		var m mkcolReq
 		if err := internal.DecodeXMLRequest(r, &m); err != nil {
-			return internal.HTTPErrorf(http.StatusBadRequest, "carddav: error parsing mkcol request: %s", err.Error())
+			return internal.HTTPErrorf(http.StatusBadRequest, "caldav: error parsing mkcol request: %s", err.Error())
 		}
 
 		if !m.ResourceType.Is(internal.CollectionName) || !m.ResourceType.Is(calendarName) {
-			return internal.HTTPErrorf(http.StatusBadRequest, "carddav: unexpected resource type")
+			return internal.HTTPErrorf(http.StatusBadRequest, "caldav: unexpected resource type")
 		}
 		cal.Name = m.DisplayName
-		// TODO ...
+		cal.Description = m.Description
 	}
 
 	return b.Backend.CreateCalendar(r.Context(), &cal)

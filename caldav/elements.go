@@ -240,5 +240,5 @@ type mkcolReq struct {
 	XMLName      xml.Name              `xml:"DAV: mkcol"`
 	ResourceType internal.ResourceType `xml:"set>prop>resourcetype"`
 	DisplayName  string                `xml:"set>prop>displayname"`
-	// TODO this could theoretically contain all addressbook properties?
+	Description  string                `xml:"set>prop>calendar-description"`
 }
